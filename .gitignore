@@ -1,1 +1,5 @@
 /target
+/folders
+.zed
+.idea
+.DS_Store
