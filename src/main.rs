@@ -127,8 +127,16 @@ fn process_many() -> io::Result<()> {
 // Single thread: 12.779892166s | 12.7 | 12.6
 // Multy threaded: 7.990087375s | 8.431220375s | 8.7
 
+fn process_single() -> io::Result<()> {
+    let src_file = File::open("./folders/from/text.txt")?;
+    let dest_file = File::create("./folders/to/text.txt")?;
+    copy_file(src_file, dest_file)?;
+
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
-    time_execution!(process_many()?);
+    // time_execution!(process_many()?);
     // time_execution!(process_many_parallel()?);
 
     cleaunp()?;
