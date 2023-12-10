@@ -16,8 +16,6 @@ use tokio::join;
     - logging
     - progress feedback ⭐️
     - compression?
-
-    - implement with async?
 */
 
 macro_rules! time_execution {
