@@ -11,3 +11,4 @@ clap = { version = "3.1.18", features = ["derive"] }
 
 bytes = "1"
 indextree = "4.6.0"
+sha2 = "0.10.8"
