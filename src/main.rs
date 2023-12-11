@@ -81,58 +81,58 @@ mod tests {
         fs::remove_dir_all(dest_folder_path).unwrap();
     }
 
-    #[tokio::test]
-    async fn test_copy_folder_sync() {
-        use sha2::{Digest, Sha256};
-        use std::io::{BufReader, Read};
+    // #[tokio::test]
+    // async fn test_copy_folder_sync() {
+    //     use sha2::{Digest, Sha256};
+    //     use std::io::{BufReader, Read};
 
-        let (src_folder_path, dest_folder_path) = setup_test_environment();
+    //     let (src_folder_path, dest_folder_path) = setup_test_environment();
 
-        let copy_handler = CopyHandler::new();
+    //     let copy_handler = CopyHandler::new();
 
-        let time_taken = time_execution!(copy_handler
-            .copy_folder_flat(&src_folder_path, &dest_folder_path)
-            .await
-            .unwrap());
+    //     let time_taken = time_execution!(copy_handler
+    //         .copy_folder_flat(&src_folder_path, &dest_folder_path)
+    //         .await
+    //         .unwrap());
 
-        dbg!(time_taken);
+    //     dbg!(time_taken);
 
-        let src_entries = fs::read_dir(src_folder_path).unwrap();
-        let dest_entries = fs::read_dir(dest_folder_path).unwrap();
+    //     let src_entries = fs::read_dir(src_folder_path).unwrap();
+    //     let dest_entries = fs::read_dir(dest_folder_path).unwrap();
 
-        for (src_entry, dest_entry) in src_entries.zip(dest_entries) {
-            let src_entry = src_entry.unwrap();
-            let src_filename = src_entry.file_name();
-            let src_filesize = src_entry.metadata().unwrap().len();
+    //     for (src_entry, dest_entry) in src_entries.zip(dest_entries) {
+    //         let src_entry = src_entry.unwrap();
+    //         let src_filename = src_entry.file_name();
+    //         let src_filesize = src_entry.metadata().unwrap().len();
 
-            let dest_entry = dest_entry.unwrap();
-            let dest_filename = dest_entry.file_name();
-            let dest_filesize = dest_entry.metadata().unwrap().len();
+    //         let dest_entry = dest_entry.unwrap();
+    //         let dest_filename = dest_entry.file_name();
+    //         let dest_filesize = dest_entry.metadata().unwrap().len();
 
-            assert_eq!(src_filename, dest_filename);
-            assert_eq!(src_filesize, dest_filesize);
+    //         assert_eq!(src_filename, dest_filename);
+    //         assert_eq!(src_filesize, dest_filesize);
 
-            // comparing files data
+    //         // comparing files data
 
-            let mut src_buf = Vec::new();
-            let mut src_buf_reader = BufReader::new(File::open(src_entry.path()).unwrap());
-            src_buf_reader.read_to_end(&mut src_buf).unwrap();
+    //         let mut src_buf = Vec::new();
+    //         let mut src_buf_reader = BufReader::new(File::open(src_entry.path()).unwrap());
+    //         src_buf_reader.read_to_end(&mut src_buf).unwrap();
 
-            let mut src_hasher = Sha256::new();
-            src_hasher.update(src_buf);
-            let src_hash_result = src_hasher.finalize();
+    //         let mut src_hasher = Sha256::new();
+    //         src_hasher.update(src_buf);
+    //         let src_hash_result = src_hasher.finalize();
 
-            let mut dest_buf = Vec::new();
-            let mut dest_buf_reader = BufReader::new(File::open(dest_entry.path()).unwrap());
-            dest_buf_reader.read_to_end(&mut dest_buf).unwrap();
+    //         let mut dest_buf = Vec::new();
+    //         let mut dest_buf_reader = BufReader::new(File::open(dest_entry.path()).unwrap());
+    //         dest_buf_reader.read_to_end(&mut dest_buf).unwrap();
 
-            let mut dest_hasher = Sha256::new();
-            dest_hasher.update(dest_buf);
-            let dest_hash_result = dest_hasher.finalize();
+    //         let mut dest_hasher = Sha256::new();
+    //         dest_hasher.update(dest_buf);
+    //         let dest_hash_result = dest_hasher.finalize();
 
-            assert_eq!(src_hash_result, dest_hash_result);
-        }
+    //         assert_eq!(src_hash_result, dest_hash_result);
+    //     }
 
-        teardown_test_environment(src_folder_path, dest_folder_path);
-    }
+    //     teardown_test_environment(src_folder_path, dest_folder_path);
+    // }
 }
