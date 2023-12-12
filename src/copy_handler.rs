@@ -4,16 +4,35 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::time_execution;
+use crate::log_time_execution;
+
+// TODO: can be possible to introduce traits?
+
+struct MsgLogBoundary(usize);
+
+// ugly imperative shit
+impl From<usize> for MsgLogBoundary {
+    fn from(value: usize) -> Self {
+        // 1GB
+        if value > 1e10 as usize {
+            MsgLogBoundary(1000)
+        } else {
+            MsgLogBoundary(100)
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct CopyHandler;
 
-struct Msg {
-    // id
-    // progress
-    // filename?
+#[derive(Debug)]
+pub struct Msg {
+    pub spawn_id: usize, // TODO: better name?
+    pub progress: usize,
 }
+
+// TODO: is AtomicSender a good name?
+type AtomicSender = Arc<Sender<Msg>>;
 
 impl CopyHandler {
     pub fn new() -> Self {
@@ -21,21 +40,32 @@ impl CopyHandler {
     }
 
     pub async fn execute(self) -> io::Result<()> {
-        let (sender, mut receiver): (Sender<usize>, Receiver<usize>) = mpsc::channel(1000);
+        use std::io::Write;
+
+        // TODO: correct buffer size?
+        let (sender, mut receiver): (Sender<Msg>, Receiver<Msg>) = mpsc::channel(1000);
 
         let sender = Arc::new(sender);
 
         tokio::spawn(async move {
-            while let Some(foo) = receiver.recv().await {
-                println!("Receiving = {}", foo);
+            let mut messagess_received = 0;
+
+            while let Some(msg) = receiver.recv().await {
+                messagess_received += 1;
+
+                // TODO: works great, but how to calculate progress for a bunch of files?
+                print!("\rProgress: {}%", msg.progress);
+                io::stdout().flush().unwrap();
             }
+
+            dbg!(messagess_received);
         });
 
-        let time = time_execution!(
-            self.copy_folder_flat(sender, "./folders/from", "./folders/to")
+        log_time_execution!(
+            // self.copy_folder_flat(sender, "./folders/from", "./folders/to")
+            self.copy_folder_flat(sender, "./folders/tmp", "./folders/to")
                 .await?
         );
-        dbg!(time);
 
         super::cleaunp()?;
 
@@ -44,18 +74,19 @@ impl CopyHandler {
 
     pub async fn copy_folder_flat(
         self,
-        sender: Arc<Sender<usize>>,
+        sender: AtomicSender,
         src_folder_path: &str,
         dest_folder_path: &str,
     ) -> io::Result<()> {
         let entries = fs::read_dir(src_folder_path)?;
+        // let entrires_count = &entries.count();
 
         let mut handlers = vec![];
 
-        for entry in entries {
+        for (index, entry) in entries.enumerate() {
             if let Ok(entry) = entry {
                 let file_name = entry.file_name();
-                println!("Processing file async: {:?}", &file_name);
+                // println!("Processing file async: {:?}", &file_name);
                 let file_name_str = file_name.to_str().unwrap(); // TODO: safe to use unwrap?
 
                 let src_path = entry.path();
@@ -67,7 +98,7 @@ impl CopyHandler {
                 let sender = sender.clone();
 
                 let handle = tokio::spawn(async move {
-                    CopyHandler::copy_file(sender, src_file, dest_file)
+                    CopyHandler::copy_file(sender, src_file, dest_file, index)
                         .await
                         .unwrap();
                 });
@@ -84,23 +115,26 @@ impl CopyHandler {
     }
 
     async fn copy_file(
-        sender: Arc<Sender<usize>>,
+        sender: AtomicSender,
         src_file: File,
         dest_file: File,
+        index: usize,
     ) -> io::Result<()> {
-        // TODO: need to use extra clone?
+        // TODO?
         // let sender = sender.clone();
 
         let metadata = src_file.metadata().await?;
         let file_size = metadata.len() as usize;
 
+        let log_boundary: MsgLogBoundary = file_size.into();
+
         let mut buf_reader = BufReader::new(src_file);
         let mut buf_writer = BufWriter::new(dest_file);
 
-        // let mut buffer = [0; 1024];
-        let mut buffer = [0; 256];
+        let mut buffer = [0; 8192];
 
         let mut total_read = 0;
+        let mut message_counter = 0;
 
         while let Ok(bytes_read) = buf_reader.read(&mut buffer).await {
             total_read += bytes_read;
@@ -109,16 +143,25 @@ impl CopyHandler {
                 break;
             }
 
-            let bytes_left = file_size - total_read;
+            // TODO: works great, but how to calculate progress for a bunch of files?
+            let persentage = total_read * 100 / file_size;
 
-            // dbg!(bytes_left);
+            // skipping every N message
+            if message_counter % log_boundary.0 == 0 {
+                let msg = Msg {
+                    progress: persentage,
+                    spawn_id: index,
+                };
 
-            if let Err(_) = sender.send(bytes_left).await {
-                println!("receiver dropped");
-                return Ok(());
+                if let Err(_) = sender.send(msg).await {
+                    println!("receiver dropped");
+                    return Ok(());
+                }
             }
 
             buf_writer.write_all(&buffer[..bytes_read]).await?;
+
+            message_counter += 1;
         }
 
         buf_writer.flush().await?;

@@ -26,7 +26,7 @@ async fn main() -> io::Result<()> {
 }
 
 #[macro_export]
-macro_rules! time_execution {
+macro_rules! log_time_execution {
     ($x:expr) => {{
         let start = std::time::Instant::now();
         let result = $x;
