@@ -1,4 +1,7 @@
+use std::ffi::OsString;
 use std::{fs, io, path::Path, sync::Arc};
+
+use std::collections::HashMap;
 
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -6,14 +9,11 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::log_time_execution;
 
-// TODO: can be possible to introduce traits?
-
 struct MsgLogBoundary(usize);
 
 // ugly imperative shit
 impl From<usize> for MsgLogBoundary {
     fn from(value: usize) -> Self {
-        // 1GB
         if value > 1e10 as usize {
             MsgLogBoundary(1000)
         } else {
@@ -27,12 +27,12 @@ pub struct CopyHandler;
 
 #[derive(Debug)]
 pub struct Msg {
-    pub spawn_id: usize, // TODO: better name?
+    pub id: usize,
+    pub file_name: OsString,
     pub progress: usize,
 }
 
-// TODO: is AtomicSender a good name?
-type AtomicSender = Arc<Sender<Msg>>;
+type AtomicSender = Arc<Sender<Msg>>; // TODO: naming?
 
 impl CopyHandler {
     pub fn new() -> Self {
@@ -42,27 +42,27 @@ impl CopyHandler {
     pub async fn execute(self) -> io::Result<()> {
         use std::io::Write;
 
+        let mut read_table: HashMap<OsString, usize> = HashMap::new();
+
         // TODO: correct buffer size?
         let (sender, mut receiver): (Sender<Msg>, Receiver<Msg>) = mpsc::channel(1000);
 
         let sender = Arc::new(sender);
 
         tokio::spawn(async move {
-            let mut messagess_received = 0;
-
             while let Some(msg) = receiver.recv().await {
-                messagess_received += 1;
+                read_table.insert(msg.file_name, msg.progress);
 
-                // TODO: works great, but how to calculate progress for a bunch of files?
-                print!("\rProgress: {}%", msg.progress);
+                print!("\r");
+                for (key, &value) in &read_table {
+                    print!("{}: {:.2}% ", key.to_string_lossy(), value);
+                }
+
                 io::stdout().flush().unwrap();
             }
-
-            dbg!(messagess_received);
         });
 
         log_time_execution!(
-            // self.copy_folder_flat(sender, "./folders/from", "./folders/to")
             self.copy_folder_flat(sender, "./folders/tmp", "./folders/to")
                 .await?
         );
@@ -79,15 +79,15 @@ impl CopyHandler {
         dest_folder_path: &str,
     ) -> io::Result<()> {
         let entries = fs::read_dir(src_folder_path)?;
-        // let entrires_count = &entries.count();
 
-        let mut handlers = vec![];
+        let mut spawn_handlers = vec![];
 
         for (index, entry) in entries.enumerate() {
             if let Ok(entry) = entry {
                 let file_name = entry.file_name();
-                // println!("Processing file async: {:?}", &file_name);
                 let file_name_str = file_name.to_str().unwrap(); // TODO: safe to use unwrap?
+
+                println!("Processing file async: {:?}", &file_name);
 
                 let src_path = entry.path();
                 let src_file = File::open(src_path).await?;
@@ -98,17 +98,17 @@ impl CopyHandler {
                 let sender = sender.clone();
 
                 let handle = tokio::spawn(async move {
-                    CopyHandler::copy_file(sender, src_file, dest_file, index)
+                    CopyHandler::copy_file(sender, file_name, src_file, dest_file, index)
                         .await
                         .unwrap();
                 });
 
-                handlers.push(handle);
+                spawn_handlers.push(handle);
             }
         }
 
-        for handle in handlers {
-            handle.await?;
+        for spawn_handle in spawn_handlers {
+            spawn_handle.await?;
         }
 
         Ok(())
@@ -116,13 +116,11 @@ impl CopyHandler {
 
     async fn copy_file(
         sender: AtomicSender,
+        file_name: OsString,
         src_file: File,
         dest_file: File,
         index: usize,
     ) -> io::Result<()> {
-        // TODO?
-        // let sender = sender.clone();
-
         let metadata = src_file.metadata().await?;
         let file_size = metadata.len() as usize;
 
@@ -143,14 +141,14 @@ impl CopyHandler {
                 break;
             }
 
-            // TODO: works great, but how to calculate progress for a bunch of files?
             let persentage = total_read * 100 / file_size;
 
             // skipping every N message
             if message_counter % log_boundary.0 == 0 {
                 let msg = Msg {
+                    id: index,
+                    file_name: file_name.clone(), // NOTE: okay to clone?
                     progress: persentage,
-                    spawn_id: index,
                 };
 
                 if let Err(_) = sender.send(msg).await {
