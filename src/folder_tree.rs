@@ -3,15 +3,13 @@ use std::path::Path;
 
 #[derive(Debug)]
 pub struct FolderTree {
-    root: Box<Node>,
+    pub root: Box<FolderTreeNode>,
 }
 
 impl FolderTree {
     pub fn new(src_folder_path: &str) -> Self {
-        let mut root_node = Node::create_root(src_folder_path);
+        let mut root_node = FolderTreeNode::create_root(src_folder_path);
         root_node.index();
-
-        dbg!(&root_node);
 
         FolderTree {
             root: Box::new(root_node),
@@ -20,11 +18,12 @@ impl FolderTree {
 }
 
 #[derive(Debug)]
-pub struct Node {
-    entity_kind: EntityKind,
-    children: Option<Vec<Box<Node>>>,
+pub struct FolderTreeNode {
+    pub entity_kind: EntityKind,
+    pub children: Option<Vec<Box<FolderTreeNode>>>,
 }
 
+// TODO: maybe having this kind of composition is not a great idea?
 #[derive(Debug)]
 pub enum EntityKind {
     Dir(Entity),
@@ -33,11 +32,11 @@ pub enum EntityKind {
 
 #[derive(Debug, Clone)]
 pub struct Entity {
-    path: String,
-    name: String,
+    pub path: String,
+    pub name: String,
 }
 
-impl Node {
+impl FolderTreeNode {
     pub fn create_root(src_folder_path: &str) -> Self {
         let root_dir_name = Path::new(src_folder_path)
             .file_name()
@@ -50,14 +49,14 @@ impl Node {
             name: root_dir_name,
         };
 
-        Node {
+        FolderTreeNode {
             entity_kind: EntityKind::Dir(entity),
             children: Some(vec![]),
         }
     }
 
     pub fn new(is_dir: bool, entity: Entity) -> Self {
-        Node {
+        FolderTreeNode {
             entity_kind: if is_dir {
                 EntityKind::Dir(entity)
             } else {
@@ -74,17 +73,13 @@ impl Node {
 
             for entry in entries.into_iter() {
                 let dir_entry = entry.unwrap();
-
                 let path = dir_entry.path();
                 let path = path.to_string_lossy().to_string();
-
                 let name = dir_entry.file_name().to_string_lossy().to_string();
-
                 let entity = Entity { path, name };
-
                 let file_type = dir_entry.file_type().unwrap();
 
-                let mut new_node = Node::new(file_type.is_dir(), entity);
+                let mut new_node = FolderTreeNode::new(file_type.is_dir(), entity);
 
                 if file_type.is_dir() {
                     new_node.index();
