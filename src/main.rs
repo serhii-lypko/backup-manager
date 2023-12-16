@@ -1,6 +1,7 @@
 use std::{fs, io, path::Path};
 
 mod copy_handler;
+mod folder_tree;
 
 use copy_handler::CopyHandler;
 
@@ -10,9 +11,10 @@ use copy_handler::CopyHandler;
     - ✅ move single file from dir A to dir B
     - ✅ move all files from dir A to dir B (flat copying)
     - ✅ implement async copying flat folder
-    - progress feedback ⭐️
+    - ✅ progress feedback ⭐️
     - async traverse nested data (recreate structure) ⭐️  ||  https://github.com/saschagrunert/indextree
 
+    - tests for async traverse nested data
     - logging
     - compression?
 */
@@ -37,7 +39,8 @@ macro_rules! log_time_execution {
 }
 
 pub fn cleaunp() -> io::Result<()> {
-    let dir_paths = vec![Path::new("./folders/to")];
+    // let dir_paths = vec![Path::new("./folders/to")];
+    let dir_paths = vec![Path::new("./folders/tree_to")];
 
     for dir_path in dir_paths {
         let entries = fs::read_dir(dir_path)?;

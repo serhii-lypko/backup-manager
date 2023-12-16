@@ -7,6 +7,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
+use crate::folder_tree::FolderTree;
 use crate::log_time_execution;
 
 struct MsgLogBoundary(usize);
@@ -62,17 +63,25 @@ impl CopyHandler {
             }
         });
 
-        log_time_execution!(
-            self.copy_folder_flat(sender, "./folders/tmp", "./folders/to")
-                .await?
-        );
+        // log_time_execution!(
+        // self.copy_folder_flat(sender, "./folders/tmp", "./folders/to").await?
+        // self.copy_folder_tree("./folders/tree_from").await?
+        // );
+
+        self.copy_folder_tree("./folders/tree_from").await?;
 
         super::cleaunp()?;
 
         Ok(())
     }
 
-    pub async fn copy_folder_flat(
+    pub async fn copy_folder_tree(self, src_folder_path: &str) -> io::Result<()> {
+        let folder_tree = FolderTree::new(src_folder_path);
+
+        Ok(())
+    }
+
+    pub async fn _copy_folder_flat(
         self,
         sender: AtomicSender,
         src_folder_path: &str,
