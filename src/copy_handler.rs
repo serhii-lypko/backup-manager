@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::ops::Deref;
 use std::{fs, io, path::Path, sync::Arc};
 
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use async_recursion::async_recursion;
 
-use crate::folder_tree::{EntityKind, FolderTree, FolderTreeNode};
+use crate::folder_tree::{FolderTree, FolderTreeNode, FsNodeKind};
 use crate::log_time_execution;
 
 use std::borrow::Cow;
@@ -72,7 +73,7 @@ impl CopyHandler {
         // self.copy_folder_tree("./folders/tree_from").await?
         // );
 
-        let folder_tree_index = FolderTree::new("./folders/tree_from");
+        let folder_tree_index = FolderTree::new("./folders/tree_from")?;
 
         let base_path = Path::new("./folders/tree_to/");
 
@@ -84,31 +85,29 @@ impl CopyHandler {
         Ok(())
     }
 
-    // TODO: some refactoring required
     #[async_recursion]
     pub async fn copy_folder(node: FolderTreeNode, base_path: &Path) -> io::Result<()> {
-        if let EntityKind::Dir(dir_entity) = node.entity_kind {
-            let dir_path = Path::new(base_path).join(dir_entity.name);
+        let dir_path = Path::new(base_path).join(node.name);
+        fs::create_dir(dir_path.clone())?;
 
-            fs::create_dir(dir_path.clone())?;
+        if let Some(children) = node.children {
+            for child in children {
+                let child = *child;
 
-            if let Some(children) = node.children {
-                for child in children {
-                    let child_node = *child;
-
-                    if let EntityKind::File(entity) = child_node.entity_kind {
-                        let src_file = File::open(entity.path).await?;
-
-                        let dest_path = Path::new(dir_path.as_path()).join(entity.name);
+                match child.kind {
+                    FsNodeKind::Dir => {
+                        CopyHandler::copy_folder(child, dir_path.as_path()).await?;
+                    }
+                    FsNodeKind::File => {
+                        let src_file = File::open(child.relative_path).await?;
+                        let dest_path = Path::new(dir_path.as_path()).join(child.name);
                         let dest_file = File::create(dest_path).await?;
 
                         CopyHandler::copy_file(src_file, dest_file).await?;
-                    } else {
-                        CopyHandler::copy_folder(child_node, dir_path.as_path()).await?;
                     }
                 }
             }
-        }
+        };
 
         Ok(())
     }

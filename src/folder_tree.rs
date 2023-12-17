@@ -1,5 +1,6 @@
-use std::fs;
+use std::fs::FileType;
 use std::path::Path;
+use std::{fs, io};
 
 #[derive(Debug)]
 pub struct FolderTree {
@@ -7,33 +8,40 @@ pub struct FolderTree {
 }
 
 impl FolderTree {
-    pub fn new(src_folder_path: &str) -> Self {
+    pub fn new(src_folder_path: &str) -> io::Result<Self> {
         let mut root_node = FolderTreeNode::create_root(src_folder_path);
-        root_node.index();
+        root_node.build_index()?;
 
-        FolderTree {
+        Ok(FolderTree {
             root: Box::new(root_node),
-        }
+        })
     }
 }
 
+type FolderChildren = Option<Vec<Box<FolderTreeNode>>>;
+
 #[derive(Debug)]
 pub struct FolderTreeNode {
-    pub entity_kind: EntityKind,
-    pub children: Option<Vec<Box<FolderTreeNode>>>,
-}
-
-// TODO: maybe having this kind of composition is not a great idea?
-#[derive(Debug)]
-pub enum EntityKind {
-    Dir(Entity),
-    File(Entity),
+    pub kind: FsNodeKind,
+    pub relative_path: String, // relative?
+    pub name: String,
+    pub children: FolderChildren,
 }
 
 #[derive(Debug, Clone)]
-pub struct Entity {
-    pub path: String,
-    pub name: String,
+pub enum FsNodeKind {
+    Dir,
+    File,
+}
+
+impl From<FileType> for FsNodeKind {
+    fn from(value: FileType) -> Self {
+        if value.is_dir() {
+            Self::Dir
+        } else {
+            Self::File
+        }
+    }
 }
 
 impl FolderTreeNode {
@@ -44,51 +52,49 @@ impl FolderTreeNode {
             .to_string_lossy()
             .to_string();
 
-        let entity = Entity {
-            path: src_folder_path.to_string(),
-            name: root_dir_name,
-        };
-
         FolderTreeNode {
-            entity_kind: EntityKind::Dir(entity),
+            kind: FsNodeKind::Dir,
+            relative_path: src_folder_path.to_string(),
+            name: root_dir_name,
             children: Some(vec![]),
         }
     }
 
-    pub fn new(is_dir: bool, entity: Entity) -> Self {
+    pub fn new(kind: FsNodeKind, name: String, relative_path: String) -> Self {
+        let children: FolderChildren = match &kind {
+            FsNodeKind::Dir => Some(vec![]),
+            FsNodeKind::File => None,
+        };
+
         FolderTreeNode {
-            entity_kind: if is_dir {
-                EntityKind::Dir(entity)
-            } else {
-                EntityKind::File(entity)
-            },
-            children: if is_dir { Some(vec![]) } else { None },
+            kind,
+            name,
+            relative_path,
+            children,
         }
     }
 
-    // TODO: error handling
-    pub fn index(&mut self) {
-        if let EntityKind::Dir(entity) = &mut self.entity_kind {
-            let entries = fs::read_dir(&entity.path).unwrap();
+    pub fn build_index(&mut self) -> io::Result<()> {
+        let entries = fs::read_dir(&self.relative_path)?;
 
-            for entry in entries.into_iter() {
-                let dir_entry = entry.unwrap();
-                let path = dir_entry.path();
-                let path = path.to_string_lossy().to_string();
-                let name = dir_entry.file_name().to_string_lossy().to_string();
-                let entity = Entity { path, name };
-                let file_type = dir_entry.file_type().unwrap();
+        for child_entry in entries.into_iter() {
+            let child_entry = child_entry?;
 
-                let mut new_node = FolderTreeNode::new(file_type.is_dir(), entity);
+            let path = child_entry.path().to_string_lossy().to_string();
+            let name = child_entry.file_name().to_string_lossy().to_string();
+            let kind: FsNodeKind = child_entry.file_type()?.into();
 
-                if file_type.is_dir() {
-                    new_node.index();
-                }
+            let mut new_node = FolderTreeNode::new(kind.clone(), name, path);
 
-                if let Some(children) = &mut self.children {
-                    children.push(Box::new(new_node));
-                }
+            if let FsNodeKind::Dir = kind {
+                new_node.build_index()?;
+            }
+
+            if let Some(children) = &mut self.children {
+                children.push(Box::new(new_node));
             }
         }
+
+        Ok(())
     }
 }
