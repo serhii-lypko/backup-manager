@@ -1,5 +1,4 @@
-use std::ffi::OsString;
-use std::ops::Deref;
+use std::path::PathBuf;
 use std::{fs, io, path::Path, sync::Arc};
 
 use std::collections::HashMap;
@@ -11,9 +10,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use async_recursion::async_recursion;
 
 use crate::folder_tree::{FolderTree, FolderTreeNode, FsNodeKind};
-use crate::log_time_execution;
-
-use std::borrow::Cow;
 
 struct MsgLogBoundary(usize);
 
@@ -34,11 +30,13 @@ pub struct CopyHandler;
 #[derive(Debug)]
 pub struct Msg {
     pub id: usize,
-    pub file_name: OsString,
+    pub file_name: String,
     pub progress: usize,
 }
 
 type AtomicSender = Arc<Sender<Msg>>; // TODO: naming?
+
+// TODO: implment also with arena index tree? (what is index tree?)
 
 impl CopyHandler {
     pub fn new() -> Self {
@@ -48,9 +46,8 @@ impl CopyHandler {
     pub async fn execute(self) -> io::Result<()> {
         use std::io::Write;
 
-        let mut read_table: HashMap<OsString, usize> = HashMap::new();
+        let mut read_table: HashMap<String, usize> = HashMap::new();
 
-        // TODO: correct buffer size?
         let (sender, mut receiver): (Sender<Msg>, Receiver<Msg>) = mpsc::channel(1000);
 
         let sender = Arc::new(sender);
@@ -61,49 +58,54 @@ impl CopyHandler {
 
                 print!("\r");
                 for (key, &value) in &read_table {
-                    print!("{}: {:.2}% ", key.to_string_lossy(), value);
+                    print!("{}: {:.2}% ", key, value);
                 }
 
                 io::stdout().flush().unwrap();
             }
         });
 
-        // log_time_execution!(
-        // self.copy_folder_flat(sender, "./folders/tmp", "./folders/to").await?
-        // self.copy_folder_tree("./folders/tree_from").await?
-        // );
+        // let folder_tree_index = FolderTree::new("./folders/tree_from")?;
+        // CopyHandler::copy_folder(
+        //     *folder_tree_index.root,
+        //     Path::new("./folders/tree_to/"),
+        //     sender,
+        // )
+        // .await?;
 
-        let folder_tree_index = FolderTree::new("./folders/tree_from")?;
-
-        let base_path = Path::new("./folders/tree_to/");
-
-        CopyHandler::copy_folder(*folder_tree_index.root, base_path).await?;
-
-        // TODO: update cleaunp to delete all data
-        // super::cleaunp()?;
+        let folder_tree_index = FolderTree::new("./folders/from")?;
+        CopyHandler::_copy_folder_flat(*folder_tree_index.root, Path::new("./folders/to"), sender)
+            .await?;
 
         Ok(())
     }
 
+    // TODO: return join handle?
     #[async_recursion]
-    pub async fn copy_folder(node: FolderTreeNode, base_path: &Path) -> io::Result<()> {
+    pub async fn copy_folder_nested(
+        node: FolderTreeNode,
+        base_path: &Path,
+        sender: AtomicSender,
+    ) -> io::Result<()> {
         let dir_path = Path::new(base_path).join(node.name);
         fs::create_dir(dir_path.clone())?;
 
         if let Some(children) = node.children {
             for child in children {
+                let sender = sender.clone();
+
                 let child = *child;
 
                 match child.kind {
                     FsNodeKind::Dir => {
-                        CopyHandler::copy_folder(child, dir_path.as_path()).await?;
+                        CopyHandler::copy_folder_nested(child, dir_path.as_path(), sender).await?;
                     }
                     FsNodeKind::File => {
-                        let src_file = File::open(child.relative_path).await?;
-                        let dest_path = Path::new(dir_path.as_path()).join(child.name);
-                        let dest_file = File::create(dest_path).await?;
+                        // tokio::spawn(async move {
+                        //     CopyHandler::copy_file(child, &dir_path).await.unwrap();
+                        // });
 
-                        CopyHandler::copy_file(src_file, dest_file).await?;
+                        // CopyHandler::copy_file(child, &dir_path).await?;
                     }
                 }
             }
@@ -113,94 +115,89 @@ impl CopyHandler {
     }
 
     pub async fn _copy_folder_flat(
-        self,
+        node: FolderTreeNode,
+        base_path: &Path,
         sender: AtomicSender,
-        src_folder_path: &str,
-        dest_folder_path: &str,
     ) -> io::Result<()> {
-        let entries = fs::read_dir(src_folder_path)?;
+        let dir_path = Path::new(base_path).join(node.name);
+        fs::create_dir(dir_path.clone())?;
 
-        // let mut spawn_handlers = vec![];
+        let mut spawn_handlers = vec![];
 
-        for (index, entry) in entries.enumerate() {
-            if let Ok(entry) = entry {
-                let file_name = entry.file_name();
-                let file_name_str = file_name.to_str().unwrap(); // TODO: safe to use unwrap?
-
-                println!("Processing file async: {:?}", &file_name);
-
-                let src_path = entry.path();
-                let src_file = File::open(src_path).await?;
-
-                let dest_path = Path::new(dest_folder_path).join(file_name_str);
-                let dest_file = File::create(dest_path).await?;
-
+        if let Some(children) = node.children {
+            for child in children {
+                let child = *child;
+                let dir_path = dir_path.clone();
                 let sender = sender.clone();
 
-                // TODO: fix unwrap?
-                // let handle = tokio::spawn(async move {
-                //     CopyHandler::copy_file(src_file, dest_file, file_name, sender, index)
-                //         .await
-                //         .unwrap();
-                // });
+                let handle = tokio::spawn(async move {
+                    CopyHandler::copy_file(child, &dir_path, sender)
+                        .await
+                        .unwrap();
+                });
 
-                // spawn_handlers.push(handle);
+                spawn_handlers.push(handle);
             }
         }
 
-        // for spawn_handle in spawn_handlers {
-        //     spawn_handle.await?;
-        // }
+        for spawn_handle in spawn_handlers {
+            spawn_handle.await?;
+        }
 
         Ok(())
     }
 
     async fn copy_file(
-        src_file: File,
-        dest_file: File,
-        // file_name: OsString,
-        // sender: AtomicSender,
-        // index: usize,
+        node: FolderTreeNode,
+        dir_path: &PathBuf,
+        sender: AtomicSender,
     ) -> io::Result<()> {
+        let src_file = File::open(&node.path).await?;
+        let dest_path = Path::new(dir_path.as_path()).join(node.name);
+        let dest_file = File::create(&dest_path).await?;
+
         let metadata = src_file.metadata().await?;
         let file_size = metadata.len() as usize;
 
-        // let log_boundary: MsgLogBoundary = file_size.into();
+        let log_boundary: MsgLogBoundary = file_size.into();
 
         let mut buf_reader = BufReader::new(src_file);
         let mut buf_writer = BufWriter::new(dest_file);
 
         let mut buffer = [0; 8192];
 
-        // let mut total_read = 0;
-        // let mut message_counter = 0;
+        let mut total_read = 0;
+        let mut message_counter = 0;
 
         while let Ok(bytes_read) = buf_reader.read(&mut buffer).await {
-            // total_read += bytes_read;
+            // TODO: unwrap & comlicated conversions?
+            let filename = dest_path.file_name().unwrap().to_string_lossy().to_string();
+
+            total_read += bytes_read;
 
             if bytes_read == 0 {
                 break;
             }
 
-            // let persentage = total_read * 100 / file_size;
+            let persentage = total_read * 100 / file_size;
 
             // skipping every N message
-            // if message_counter % log_boundary.0 == 0 {
-            //     let msg = Msg {
-            //         id: index,
-            //         file_name: file_name.clone(), // NOTE: okay to clone?
-            //         progress: persentage,
-            //     };
+            if message_counter % log_boundary.0 == 0 {
+                let msg = Msg {
+                    id: 0,
+                    file_name: filename,
+                    progress: persentage,
+                };
 
-            //     if let Err(_) = sender.send(msg).await {
-            //         println!("receiver dropped");
-            //         return Ok(());
-            //     }
-            // }
+                if let Err(_) = sender.send(msg).await {
+                    println!("receiver dropped");
+                    return Ok(());
+                }
+            }
 
             buf_writer.write_all(&buffer[..bytes_read]).await?;
 
-            // message_counter += 1;
+            message_counter += 1;
         }
 
         buf_writer.flush().await?;

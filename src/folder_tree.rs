@@ -20,10 +20,10 @@ impl FolderTree {
 
 type FolderChildren = Option<Vec<Box<FolderTreeNode>>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FolderTreeNode {
     pub kind: FsNodeKind,
-    pub relative_path: String, // relative?
+    pub path: String,
     pub name: String,
     pub children: FolderChildren,
 }
@@ -54,13 +54,13 @@ impl FolderTreeNode {
 
         FolderTreeNode {
             kind: FsNodeKind::Dir,
-            relative_path: src_folder_path.to_string(),
+            path: src_folder_path.to_string(),
             name: root_dir_name,
             children: Some(vec![]),
         }
     }
 
-    pub fn new(kind: FsNodeKind, name: String, relative_path: String) -> Self {
+    pub fn new(kind: FsNodeKind, name: String, path: String) -> Self {
         let children: FolderChildren = match &kind {
             FsNodeKind::Dir => Some(vec![]),
             FsNodeKind::File => None,
@@ -69,13 +69,13 @@ impl FolderTreeNode {
         FolderTreeNode {
             kind,
             name,
-            relative_path,
+            path,
             children,
         }
     }
 
     pub fn build_index(&mut self) -> io::Result<()> {
-        let entries = fs::read_dir(&self.relative_path)?;
+        let entries = fs::read_dir(&self.path)?;
 
         for child_entry in entries.into_iter() {
             let child_entry = child_entry?;

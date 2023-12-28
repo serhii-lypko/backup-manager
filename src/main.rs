@@ -1,9 +1,10 @@
-use std::{fs, io, path::Path};
+use std::{env, fs, io, path::Path};
 
 mod copy_handler;
 mod folder_tree;
 
 use copy_handler::CopyHandler;
+use folder_tree::FsNodeKind;
 
 /*
     Version 0.1.0: Local backup manager
@@ -15,14 +16,66 @@ use copy_handler::CopyHandler;
     - async traverse nested data (recreate structure) ⭐️  ||  https://github.com/saschagrunert/indextree
 
     - tests for async traverse nested data
-    - logging
     - compression?
+    - logging
 */
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let copy_handler = CopyHandler::new();
-    copy_handler.execute().await?;
+    let args: Vec<String> = env::args().collect();
+
+    match args.get(1) {
+        Some(arg) => match arg.as_str() {
+            "copy" => {
+                let copy_handler = CopyHandler::new();
+                log_time_execution!(copy_handler.execute().await?);
+            }
+            "cleanup" => {
+                let cleanup_dir = args.get(2).unwrap();
+                cleaunp(cleanup_dir)?;
+            }
+            _ => {
+                println!("Unknown command");
+            }
+        },
+        None => {
+            println!("No command provided");
+        }
+    }
+
+    Ok(())
+}
+
+pub fn cleaunp(path: &String) -> io::Result<()> {
+    println!("Performing cleanup...");
+    cleanup_dir(Path::new(path), false)?;
+    println!("Done");
+
+    Ok(())
+}
+
+fn cleanup_dir(path: &Path, remove_dir: bool) -> io::Result<()> {
+    let entries = fs::read_dir(path)?;
+
+    for entry in entries {
+        let entry = entry?;
+
+        let kind: FsNodeKind = entry.file_type()?.into();
+        let path = entry.path();
+
+        match kind {
+            FsNodeKind::Dir => {
+                cleanup_dir(&path, true)?;
+            }
+            FsNodeKind::File => {
+                fs::remove_file(path)?;
+            }
+        }
+    }
+
+    if remove_dir {
+        fs::remove_dir(path)?;
+    }
 
     Ok(())
 }
@@ -36,26 +89,6 @@ macro_rules! log_time_execution {
         println!("Time taken: {:?}", duration);
         result
     }};
-}
-
-pub fn cleaunp() -> io::Result<()> {
-    // let dir_paths = vec![Path::new("./folders/to")];
-    let dir_paths = vec![Path::new("./folders/tree_to")];
-
-    for dir_path in dir_paths {
-        let entries = fs::read_dir(dir_path)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_file() {
-                fs::remove_file(path)?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
