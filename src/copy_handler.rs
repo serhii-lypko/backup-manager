@@ -13,7 +13,7 @@ use crate::folder_tree::{FolderTree, FolderTreeNode, FsNodeKind};
 
 struct MsgLogBoundary(usize);
 
-// ugly imperative shit
+// TODO: ugly imperative shit
 impl From<usize> for MsgLogBoundary {
     fn from(value: usize) -> Self {
         if value > 1e10 as usize {
@@ -65,22 +65,14 @@ impl CopyHandler {
             }
         });
 
-        // let folder_tree_index = FolderTree::new("./folders/tree_from")?;
-        // CopyHandler::copy_folder(
-        //     *folder_tree_index.root,
-        //     Path::new("./folders/tree_to/"),
-        //     sender,
-        // )
-        // .await?;
+        let index = FolderTree::new("./folders/tree_from")?;
+        let base_path = Path::new("./folders/tree_to/");
 
-        let folder_tree_index = FolderTree::new("./folders/from")?;
-        CopyHandler::_copy_folder_flat(*folder_tree_index.root, Path::new("./folders/to"), sender)
-            .await?;
+        CopyHandler::copy_folder_nested(*index.root, base_path, sender).await?;
 
         Ok(())
     }
 
-    // TODO: return join handle?
     #[async_recursion]
     pub async fn copy_folder_nested(
         node: FolderTreeNode,
@@ -90,31 +82,41 @@ impl CopyHandler {
         let dir_path = Path::new(base_path).join(node.name);
         fs::create_dir(dir_path.clone())?;
 
+        let mut spawn_handlers = vec![];
+
         if let Some(children) = node.children {
             for child in children {
                 let sender = sender.clone();
-
                 let child = *child;
+                let dir_path = dir_path.clone();
 
-                match child.kind {
-                    FsNodeKind::Dir => {
-                        CopyHandler::copy_folder_nested(child, dir_path.as_path(), sender).await?;
-                    }
-                    FsNodeKind::File => {
-                        // tokio::spawn(async move {
-                        //     CopyHandler::copy_file(child, &dir_path).await.unwrap();
-                        // });
+                // TODO: fixing unwraps for handlers
 
-                        // CopyHandler::copy_file(child, &dir_path).await?;
-                    }
-                }
+                let handle = match child.kind {
+                    FsNodeKind::Dir => tokio::spawn(async move {
+                        CopyHandler::copy_folder_nested(child, dir_path.as_path(), sender)
+                            .await
+                            .unwrap();
+                    }),
+                    FsNodeKind::File => tokio::spawn(async move {
+                        CopyHandler::copy_file(child, &dir_path, sender)
+                            .await
+                            .unwrap();
+                    }),
+                };
+
+                spawn_handlers.push(handle);
             }
         };
+
+        for spawn_handle in spawn_handlers {
+            spawn_handle.await?;
+        }
 
         Ok(())
     }
 
-    pub async fn _copy_folder_flat(
+    pub async fn copy_folder_flat(
         node: FolderTreeNode,
         base_path: &Path,
         sender: AtomicSender,

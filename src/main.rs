@@ -13,10 +13,10 @@ use folder_tree::FsNodeKind;
     - ✅ move all files from dir A to dir B (flat copying)
     - ✅ implement async copying flat folder
     - ✅ progress feedback ⭐️
-    - async traverse nested data (recreate structure) ⭐️  ||  https://github.com/saschagrunert/indextree
+    - ✅ async traverse nested data (recreate structure) ⭐️  ||  https://github.com/saschagrunert/indextree
 
-    - tests for async traverse nested data
     - compression?
+    - tests for async traverse nested data
     - logging
 */
 
